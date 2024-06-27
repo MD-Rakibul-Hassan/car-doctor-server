@@ -1,15 +1,43 @@
 const express = require("express");
 const cors = require("cors");
 const jwt = require("jsonwebtoken");
+const cookie = require('cookie-parser')
 const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
 require("dotenv").config();
 
 const port = process.env.PORT || 5000;
 const app = express();
+app.use(cookie())
 
 // middlewares
 app.use(express.json());
-app.use(cors());
+app.use(
+	cors({
+		origin: ["http://localhost:5173"],
+		credentials: true,
+	})
+);
+// costom middlewares 
+const loggerMiddleWare = (req, res, next) => {
+	console.log('Called my coustom middleware => ', req.hostname, req.originalUrl)
+}
+
+const verifyToken =  (req, res, next) => {
+	const token = req.cookies?.token;
+	console.log("Value of token is :", "(", token, ")");
+	if (!token) {
+		return res.status(401).send({message:'Not Authorized'})
+	}
+	jwt.verify(token, process.env.ACCESS_TOKEN_JWT, (error, decoded) => {
+		if (error) {
+			console.log(error)
+			return res.status(401).send("Unauthorized")
+		}
+		console.log(decoded)
+		req.user = decoded
+		next()
+	})
+}
 
 const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASS}@cluster0.s3py8lp.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0`;
 
@@ -33,19 +61,23 @@ async function run() {
 		const orederColloction = database.collection("orders");
 
 		// Authorization Part with jwt
-		app.post("/jwt", async (req, res) => {
+		app.post('/jwt', async (req, res) => {
 			const user = req.body;
-			const token = jwt.sign(user, process.env.ACCESS_TOKEN_JWT, {
-				expiresIn: "1h",
-			});
+			const token = jwt.sign(user, process.env.ACCESS_TOKEN_JWT, { expiresIn: '1h' })
 			res
 				.cookie('token', token, {
 					httpOnly: true,
 					secure: false,
-					sameSite:'none'
+					sameSite:false
 				})
-				.send({succes:'Successfully token send '});
-		});
+
+				// .cookie('tokens', token, {
+				// 	httpOnly: true,
+				// 	secure: false,
+				// 	sameSite:'none'
+				// })
+				.send({success:true})
+		})
 
 		// Services Part
 		app.post("/orders", async (req, res) => {
@@ -54,8 +86,9 @@ async function run() {
 			res.send(result);
 		});
 
-		app.get("/orders", async (req, res) => {
+		app.get("/orders",verifyToken, async (req, res) => {
 			let quary = {};
+			console.log(req.user)
 			if (req.query.email) {
 				quary = { email: req.query.email };
 			}
@@ -67,11 +100,12 @@ async function run() {
 			res.send("Hello This is car doctore server");
 		});
 
-		app.get("/services", async (req, res) => {
+		app.get("/services",async (req, res) => {
 			const services = servicesColloction.find();
+			console.log('Token :', req.cookies.token)
 			const result = await services.toArray();
 			res.send(result);
-		});
+		}); 
 
 		app.get("/services/:id", async (req, res) => {
 			const id = req.params.id;
